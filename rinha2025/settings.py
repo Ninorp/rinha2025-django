@@ -11,7 +11,11 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-from huey import MemoryHuey
+from os import getenv
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.jobstores.redis import RedisJobStore
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,36 +25,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-1#o-hj7phwitu5$#8rfq5uol+xti4*8!eco)h5byz&9ki@3gp@'
+SECRET_KEY = getenv('SECRET_KEY', 'django-insecure-1#o-hj7phwitu5$#8rfq5uol+xti4*8!eco)h5byz&9ki@3gp@')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = getenv('DEBUG', 'True').lower() in ('1', 'true', 'yes', 'on')
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [h for h in getenv('ALLOWED_HOSTS', '*').split(',') if h]
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'huey.contrib.djhuey',
     'payments',
+    'ninja'
 ]
 
-HUEY = {
-    'name': 'payments',
-    'results': False,
-    'huey_class': 'huey.RedisHuey',
-    'connection': {
-        'host': 'localhost',
-        'port': 6379,
+SCHEDULER = AsyncIOScheduler(
+    jobstores={
+        'default': RedisJobStore(
+            host=getenv('REDIS_HOST', 'localhost'),
+            port=int(getenv('REDIS_PORT', '6379')),
+            db=int(getenv('REDIS_DB', '0')),
+        )
     },
-    'consumer': {
-        'logging': False,
-        'workers': 2,
-        'scheduler_interval': 1,  # Check schedule every second, -s.
-        'periodic': True,  # Enable crontab feature.
+    job_defaults={
+        'coalesce': True,
+        'max_instances': 2
     }
-}
+)
 
 MIDDLEWARE = []
 
@@ -80,11 +82,11 @@ WSGI_APPLICATION = 'rinha2025.wsgi.application'
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "mydatabase",
-        "USER": "mydatabaseuser",
-        "PASSWORD": "mypassword",
-        "HOST": "127.0.0.1",
-        "PORT": "5432",
+        "NAME": getenv("POSTGRES_DB", "mydatabase"),
+        "USER": getenv("POSTGRES_USER", "mydatabaseuser"),
+        "PASSWORD": getenv("POSTGRES_PASSWORD", "mypassword"),
+        "HOST": getenv("POSTGRES_HOST", "127.0.0.1"),
+        "PORT": getenv("POSTGRES_PORT", "5432"),
     }
 }
 

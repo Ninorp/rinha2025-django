@@ -1,11 +1,8 @@
 import httpx
 
-from time import sleep
 from os import getenv
-from huey import crontab
-from huey.contrib.djhuey import task, periodic_task
-
-from payments.models import Payment
+from django.db import transaction
+from asgiref.sync import sync_to_async
 
 
 PAYMENT_PROCESSOR_URL_DEFAULT = getenv("PAYMENT_PROCESSOR_URL_DEFAULT")
@@ -14,49 +11,63 @@ PAYMENT_PROCESSOR_URL_FALLBACK = getenv("PAYMENT_PROCESSOR_URL_FALLBACK")
 HEALTH_RESULTS = {}
 
 
-@task(priority=1, retry=50, retry_delay=5)
-def process_payment(payment_id):
-    payment = Payment.objects.get(correlation_id=payment_id)
-    
-    def _process(url):
+@sync_to_async
+def _get_payment_locked(payment_id: str):
+    from payments.models import Payment
+
+    with transaction.atomic():
+        return Payment.objects.select_for_update(
+            of=("self",)
+        ).get(correlation_id=payment_id)
+
+
+@sync_to_async
+def _mark_completed(payment):
+    payment.mark_as_completed()
+
+
+async def process_payment(payment_id: str):
+    payment = await _get_payment_locked(payment_id)
+
+    async def _process(url: str) -> bool:
         try:
-            response = httpx.post(url, json={
-                "correlationId": payment_id,
-                "amount": payment.amount,
-                "requestedAt": payment.created_at.isoformat(),
-            })
-            return response.status_code == 200
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.post(
+                    url,
+                    json={
+                        "correlationId": payment_id,
+                        "amount": float(payment.amount),
+                        "requestedAt": payment.created_at.isoformat(),
+                    },
+                )
+            return resp.status_code == 200
         except Exception:
             return False
-        
+
     url = None
     for _url, result in HEALTH_RESULTS.items():
         if not result.get("failing"):
             url = _url
             break
-    
-    if url:
-        ok = _process(url)
-        if ok:
-            payment.mark_as_completed()
-            return
-    
-    raise Exception("Payment processing failed")
+
+    if url and await _process(url):
+        await _mark_completed(payment)
+        return
+
+    raise RuntimeError("Payment processing failed")
 
 
-@periodic_task(lambda _: True, priority=0)
-def health_check():
-    sleep(5)
-    def _check(url):
+async def health_check():
+    async def _check(url: str):
         try:
-            response = httpx.get(f'{url}/payments/service-health', timeout=2)
-            if response.status_code == 200:
-                HEALTH_RESULTS[url] = response.json()
+            async with httpx.AsyncClient(timeout=2) as client:
+                resp = await client.get(f"{url}/payments/service-health")
+            if resp.status_code == 200:
+                HEALTH_RESULTS[url] = resp.json()
+                return
         except Exception:
-            HEALTH_RESULTS[url] = {
-                "failing": True,
-                "minRequestTime": 999999
-            }
+            pass
+        HEALTH_RESULTS[url] = {"failing": True, "minRequestTime": 999999}
 
-    _check(PAYMENT_PROCESSOR_URL_DEFAULT)
-    _check(PAYMENT_PROCESSOR_URL_FALLBACK)
+    await _check(PAYMENT_PROCESSOR_URL_DEFAULT)
+    await _check(PAYMENT_PROCESSOR_URL_FALLBACK)
