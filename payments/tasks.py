@@ -22,8 +22,8 @@ def _get_payment_locked(payment_id: str):
 
 
 @sync_to_async
-def _mark_completed(payment):
-    payment.mark_as_completed()
+def _mark_completed(payment, url):
+    payment.mark_as_completed(url)
 
 
 async def process_payment(payment_id: str):
@@ -51,7 +51,7 @@ async def process_payment(payment_id: str):
             break
 
     if url and await _process(url):
-        await _mark_completed(payment)
+        await _mark_completed(payment, url)
         return
 
     raise RuntimeError("Payment processing failed")
