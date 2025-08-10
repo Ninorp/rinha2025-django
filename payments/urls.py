@@ -10,7 +10,8 @@ from rinha2025.settings import SCHEDULER
 
 payments_router = Router()
 
-@payments_router.post('/')
+
+@payments_router.post('/payments')
 def create_payment(request, payload: PaymentSchema):
     if payload.amount <= 0:
         return HttpResponseBadRequest()
