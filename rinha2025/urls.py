@@ -15,9 +15,16 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.urls import path
+from ninja import NinjaAPI
 
 from payments.urls import payments_router
+from payments_summary.urls import payments_summary_router
+
+# Create a NinjaAPI instance and attach the payments router
+api = NinjaAPI()
+api.add_router("/payments", payments_router)
+api.add_router("/payments-summary", payments_summary_router)
 
 urlpatterns = [
-    path('payments/', payments_router.api.urls),
+    path("", api.urls),
 ]

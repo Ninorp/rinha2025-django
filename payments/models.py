@@ -9,13 +9,14 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.correlation_id
+        return self.correlationId
 
     class Meta:
         ordering = ['-created_at']
+        db_table = 'payments_payment'
         indexes = [
             models.Index(
-                fields=['created_at', 'status', 'amount'],
+                fields=['created_at', 'gatewayIdentifier', 'status', 'amount'],
                 name='payment_index'
             )
         ]

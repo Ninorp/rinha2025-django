@@ -31,6 +31,9 @@ services:
         limits:
           cpus: "0.5"
           memory: "110M"
+    networks:
+      - rinha-net
+      - payment-processor-net
 
   web2:
     <<: *web
@@ -67,6 +70,8 @@ services:
         limits:
           cpus: "0.25"
           memory: "60M"
+    networks:
+      - rinha-net
 
   db:
     image: postgres:16-alpine
@@ -106,3 +111,10 @@ services:
 volumes:
   pgdata:
   sockets:
+
+networks:
+  rinha-net:
+    driver: bridge
+  payment-processor-net:
+    name: payment-processor
+    external: true

@@ -13,7 +13,7 @@ from payments.tasks import (
 payments_summary_router = Router()
 
 
-@payments_summary_router.get('/payments-summary')
+@payments_summary_router.get('')
 def payments_summary(
     request,
     date_from: datetime = Query(..., alias="from"),

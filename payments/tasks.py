@@ -12,13 +12,13 @@ HEALTH_RESULTS = {}
 
 
 @sync_to_async
-def _get_payment_locked(payment_id: str):
+def _get_payment_locked(correlation_id: str):
     from payments.models import Payment
 
     with transaction.atomic():
         return Payment.objects.select_for_update(
             of=("self",)
-        ).get(correlation_id=payment_id)
+        ).get(correlationId=correlation_id)
 
 
 @sync_to_async
