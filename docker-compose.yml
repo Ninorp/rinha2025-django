@@ -93,6 +93,8 @@ services:
         limits:
           cpus: "0.20"
           memory: "60M"
+    networks:
+      - rinha-net
 
   redis:
     image: redis:7-alpine
@@ -107,6 +109,8 @@ services:
         limits:
           cpus: "0.05"
           memory: "10M"
+    networks:
+      - rinha-net
 
 volumes:
   pgdata:

@@ -13,12 +13,12 @@ payments_router = Router()
 
 
 @payments_router.post('')
-def create_payment(request, payload: PaymentSchema):
+async def create_payment(request, payload: PaymentSchema):
     if payload.amount <= 0:
         return HttpResponseBadRequest()
 
     try:
-        Payment.objects.create(
+        await Payment.objects.acreate(
             **payload.dict()
         )
     except IntegrityError:
