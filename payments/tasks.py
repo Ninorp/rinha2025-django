@@ -1,3 +1,4 @@
+import logging
 import httpx
 
 from os import getenv
@@ -10,6 +11,12 @@ PAYMENT_PROCESSOR_URL_FALLBACK = getenv("PAYMENT_PROCESSOR_URL_FALLBACK")
 
 HEALTH_RESULTS = {}
 
+logger = logging.getLogger('payments_tasks')
+logger.setLevel(logging.DEBUG)
+
+fh = logging.FileHandler("payments.log")
+fh.setLevel(logging.DEBUG)
+logger.addHandler(fh)
 
 @sync_to_async
 def _get_payment_locked(correlation_id: str):
@@ -32,6 +39,7 @@ async def process_payment(payment_id: str):
     async def _process(url: str) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5) as client:
+                logger.debug("Calling %s", url)
                 resp = await client.post(
                     url,
                     json={
@@ -40,6 +48,7 @@ async def process_payment(payment_id: str):
                         "requestedAt": payment.created_at.isoformat(),
                     },
                 )
+                logger.debug("Response: %s", resp.json())
             return resp.status_code == 200
         except Exception:
             return False
@@ -47,8 +56,10 @@ async def process_payment(payment_id: str):
     url = None
     for _url, result in HEALTH_RESULTS.items():
         if not result.get("failing"):
-            url = _url
+            url = _url + '/payments'
             break
+
+    logger.debug("Selected url: %s", url)
 
     if url and await _process(url):
         await _mark_completed(payment, url)
@@ -71,3 +82,5 @@ async def health_check():
 
     await _check(PAYMENT_PROCESSOR_URL_DEFAULT)
     await _check(PAYMENT_PROCESSOR_URL_FALLBACK)
+
+    logger.info("Health results: %s", HEALTH_RESULTS)
