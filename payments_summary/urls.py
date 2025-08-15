@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Optional
 from django.db.models import Sum, Count
 from ninja import Query, Router
 
@@ -16,8 +17,8 @@ payments_summary_router = Router()
 @payments_summary_router.get('')
 def payments_summary(
     request,
-    date_from: datetime = Query(..., alias="from"),
-    date_to:   datetime = Query(..., alias="to")
+    date_from: Optional[datetime] = Query(None, alias="from"),
+    date_to: Optional[datetime] = Query(None, alias="to")
 ):
     payments = Payment.objects.filter(
         status='completed',
@@ -50,6 +51,6 @@ def payments_summary(
 
 def normalize(summary):
     return {
-        "totalAmount": summary.get("totalAmount") or Decimal("0"),
+        "totalAmount": summary.get("totalAmount") or 0,
         "totalRequests": summary.get("totalRequests") or 0,
     }
