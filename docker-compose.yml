@@ -50,7 +50,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_DB: "0"
-      PAYMENT_PROCESSOR_URL_DEFAULT: "http://payment-processor:8080"
+      PAYMENT_PROCESSOR_URL_DEFAULT: "http://payment-processor-default:8080"
       PAYMENT_PROCESSOR_URL_FALLBACK: "http://payment-processor-fallback:8080"
       APP_SOCKET_NAME: "web2.sock"
 
