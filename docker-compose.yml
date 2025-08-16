@@ -1,6 +1,7 @@
 version: "3.9"
 
 services:
+
   web1: &web
     build: .
     container_name: rinha-web-1
@@ -16,7 +17,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_DB: "0"
-      PAYMENT_PROCESSOR_URL_DEFAULT: "http://payment-processor:8080"
+      PAYMENT_PROCESSOR_URL_DEFAULT: "http://payment-processor-default:8080"
       PAYMENT_PROCESSOR_URL_FALLBACK: "http://payment-processor-fallback:8080"
       APP_SOCKET_NAME: "web1.sock"
     volumes:
@@ -29,8 +30,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "110M"
+          cpus: "0.4"
+          memory: "75M"
     networks:
       - rinha-net
       - payment-processor-net
@@ -54,6 +55,39 @@ services:
       PAYMENT_PROCESSOR_URL_FALLBACK: "http://payment-processor-fallback:8080"
       APP_SOCKET_NAME: "web2.sock"
 
+  scheduler:
+    build: .
+    container_name: rinha-scheduler
+    command: python scheduler_service.py
+    environment:
+      DEBUG: "1"
+      SECRET_KEY: "dev-secret-change-me"
+      ALLOWED_HOSTS: "*"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: mydatabase
+      POSTGRES_USER: mydatabaseuser
+      POSTGRES_PASSWORD: mypassword
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      PAYMENT_PROCESSOR_URL_DEFAULT: "http://payment-processor-default:8080"
+      PAYMENT_PROCESSOR_URL_FALLBACK: "http://payment-processor-fallback:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: "130M"
+    restart: always
+    networks:
+      - rinha-net
+      - payment-processor-net
+
   lb:
     image: nginx:alpine
     container_name: rinha-lb
@@ -68,8 +102,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: "60M"
+          cpus: "0.05"
+          memory: "15M"
     networks:
       - rinha-net
 
@@ -91,8 +125,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.20"
-          memory: "60M"
+          cpus: "0.30"
+          memory: "45M"
     networks:
       - rinha-net
 

@@ -40,14 +40,20 @@ INSTALLED_APPS = [
     'ninja'
 ]
 
+REDIS_HOST = getenv('REDIS_HOST', 'localhost')
+REDIS_PORT = getenv('REDIS_PORT', '6379')
+REDIS_DB = getenv('REDIS_DB', '0')
+
+JOBSTORES = {
+    'default': RedisJobStore(
+        host=REDIS_HOST,
+        port=int(REDIS_PORT),
+        db=int(REDIS_DB),
+    )
+}
+
 SCHEDULER = AsyncIOScheduler(
-    jobstores={
-        'default': RedisJobStore(
-            host=getenv('REDIS_HOST', 'localhost'),
-            port=int(getenv('REDIS_PORT', '6379')),
-            db=int(getenv('REDIS_DB', '0')),
-        )
-    },
+    jobstores=JOBSTORES,
     job_defaults={
         'coalesce': True,
         'max_instances': 2

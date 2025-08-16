@@ -4,9 +4,7 @@ from ninja import Router
 
 from payments.models import Payment
 from payments.schemas import PaymentSchema
-from payments.tasks import process_payment
-
-from rinha2025.settings import SCHEDULER
+from payments.utils import publish_payment
 
 
 payments_router = Router()
@@ -24,11 +22,5 @@ async def create_payment(request, payload: PaymentSchema):
     except IntegrityError:
         return HttpResponseBadRequest("Integrity error occurred while creating the payment.")
 
-    SCHEDULER.add_job(
-        process_payment,
-        args=[payload.correlationId],
-        id=f"process_payment_{payload.correlationId}",
-        replace_existing=True,
-    )
-
+    await publish_payment(payload.correlationId)
     return HttpResponse()
