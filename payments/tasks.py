@@ -4,6 +4,7 @@ import httpx
 from os import getenv
 from django.db import transaction
 from asgiref.sync import sync_to_async
+from payments.utils import publish_payment
 
 
 PAYMENT_PROCESSOR_URL_DEFAULT = getenv("PAYMENT_PROCESSOR_URL_DEFAULT")
@@ -40,8 +41,9 @@ async def process_payment(payment_id: str):
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 logger.debug("Calling %s", url)
+                payments_url = url + '/payments'
                 resp = await client.post(
-                    url,
+                    payments_url,
                     json={
                         "correlationId": payment_id,
                         "amount": float(payment.amount),
@@ -56,7 +58,7 @@ async def process_payment(payment_id: str):
     url = None
     for _url, result in HEALTH_RESULTS.items():
         if not result.get("failing"):
-            url = _url + '/payments'
+            url = _url
             break
 
     logger.debug("Selected url: %s", url)
@@ -65,7 +67,8 @@ async def process_payment(payment_id: str):
         await _mark_completed(payment, url)
         return
 
-    raise RuntimeError("Payment processing failed")
+    logger.debug('Rescheduling payment %s', payment_id)
+    await publish_payment(payment_id)
 
 
 async def health_check():
