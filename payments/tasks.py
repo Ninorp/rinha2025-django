@@ -57,7 +57,11 @@ async def process_payment(payload: list):
         )
 
     logger.debug('Failed to process payment: %s', correlation_id)
-    await add_payment_to_queue(payload)
+    await add_payment_to_queue({
+        "correlationId": correlation_id,
+        "amount": amount,
+        "created_at": created_at
+    })
     return None
     
 
