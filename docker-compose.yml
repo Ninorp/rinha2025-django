@@ -14,9 +14,9 @@ x-common-env: &common_env
   REDIS_URL: "unix:///sockets/redis.sock"
   PAYMENT_PROCESSOR_URL_DEFAULT: "http://payment-processor-default:8080"
   PAYMENT_PROCESSOR_URL_FALLBACK: "http://payment-processor-fallback:8080"
-  SUBSCRIBER_QUEUE_MAXSIZE: "1000"
+  SUBSCRIBER_QUEUE_MAXSIZE: "900"
   SCHEDULER_WORKERS: "3"
-  SUBSCRIBER_BATCH_SIZE: "50"
+  SUBSCRIBER_BATCH_SIZE: "60"
 
 services:
 
@@ -88,7 +88,7 @@ services:
       resources:
         limits:
           cpus: "0.05"
-          memory: "10M"
+          memory: "9M"
     networks:
       - rinha-net
 
@@ -143,7 +143,7 @@ services:
       resources:
         limits:
           cpus: "0.05"
-          memory: "10M"
+          memory: "11M"
     networks:
       - rinha-net
 

@@ -22,8 +22,8 @@ GROUP_NAME = "payment_processors"
 CONSUMER_NAME = "consumer-default"
 
 
-QUEUE_MAXSIZE = int(os.getenv("SUBSCRIBER_QUEUE_MAXSIZE", "1000"))
-BATCH_SIZE = int(os.getenv("SUBSCRIBER_BATCH_SIZE", "90"))
+QUEUE_MAXSIZE = int(os.getenv("SUBSCRIBER_QUEUE_MAXSIZE", "900"))
+BATCH_SIZE = int(os.getenv("SUBSCRIBER_BATCH_SIZE", "80"))
 WORKERS = int(os.getenv("SCHEDULER_WORKERS", "3"))
 
 root_logger = logging.getLogger()
@@ -44,77 +44,79 @@ async def worker(queue: asyncio.Queue):
     from payments.models import Payment
 
     while True:
-        # Wait and get first payload
         try:
             first_payload = await asyncio.wait_for(queue.get(), timeout=1.0)
-            payloads = [first_payload]
         except asyncio.TimeoutError:
             continue
 
-        drain_size = min(BATCH_SIZE - 1, queue.qsize())
-        for _ in range(drain_size):
-            try:
-                payloads.append(queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
+        payloads = [first_payload]
+        while len(payloads) < BATCH_SIZE and not queue.empty():
+            payloads.append(queue.get_nowait())
 
-        # Create asynchronous tasks (process_payment is async)
         tasks = [asyncio.create_task(process_payment(payload)) for payload in payloads]
-
+        
         payments_to_create = []
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for res in results:
-            if not res or not isinstance(res, dict):
-                continue
-            payments_to_create.append(Payment(**res))
-
         try:
-            if payments_to_create:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, dict):
+                    payments_to_create.append(Payment(**res))
+                elif isinstance(res, Exception):
+                    logger.error("Error in process_payment task", exc_info=res)
+        except Exception as e:
+            logger.exception("Error gathering payment processing tasks", exc_info=e)
+
+        if payments_to_create:
+            try:
                 await Payment.objects.abulk_create(
                     payments_to_create, ignore_conflicts=True
                 )
                 logger.info("Successfully bulk created %d payments.", len(payments_to_create))
-        except Exception:
-            logger.exception("Failed during bulk_create")
-        finally:
-            for _ in range(len(payloads)):
-                try:
-                    queue.task_done()
-                except Exception:
-                    pass
+            except Exception:
+                logger.exception("Failed during bulk_create")
+        
+        for _ in range(len(payloads)):
+            queue.task_done()
 
 
 async def stream_consumer(queue: asyncio.Queue):
     client = aioredis.Redis(connection_pool=REDIS_POOL)
-    queue_size = queue.qsize()
     
     while True:
         try:
+            available_space = QUEUE_MAXSIZE - queue.qsize()
+
+            if available_space <= 0:
+                await asyncio.sleep(0.2)
+                continue
+
+            count = min(QUEUE_MAXSIZE, available_space)
+
             stream_data = await client.xreadgroup(
                 groupname=GROUP_NAME,
                 consumername=CONSUMER_NAME,
                 streams={STREAM_NAME: '>'},
-                count=QUEUE_MAXSIZE - queue_size,
+                count=count,
                 block=1000,
             )
             
             if not stream_data:
-                await asyncio.sleep(1)
                 continue
 
             messages = stream_data[0][1]
             ids_to_ack = []
 
             for message_id, message in messages:
-                unpacked = msgpack.unpackb(message[b'payload'], raw=False)
-
-                if not isinstance(unpacked, list) or len(unpacked) != 3:
-                    logger.warning("process_payment message missing fields: %s", unpacked)
-                    continue
-                
-                await queue.put(unpacked)
-                ids_to_ack.append(message_id)
+                try:
+                    unpacked = msgpack.unpackb(message[b'payload'], raw=False)
+                    if not isinstance(unpacked, list) or len(unpacked) != 3:
+                        logger.warning("Invalid message format: %s", unpacked)
+                        continue
+                    
+                    await queue.put(unpacked)
+                    ids_to_ack.append(message_id)
+                except Exception:
+                    logger.exception("Failed to unpack or queue a message.")
 
             if ids_to_ack:
                 await client.xack(STREAM_NAME, GROUP_NAME, *ids_to_ack)
