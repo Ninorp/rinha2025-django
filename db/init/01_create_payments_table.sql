@@ -9,4 +9,4 @@ CREATE TABLE IF NOT EXISTS payments_payment (
     "created_at" timestamp with time zone NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS payment_index ON payments_payment ("created_at");
+CREATE INDEX IF NOT EXISTS payment_index ON payments_payment ("created_at", "status");

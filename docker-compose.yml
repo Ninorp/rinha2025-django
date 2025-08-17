@@ -129,9 +129,9 @@ services:
     volumes:
       - ./redis.conf:/etc/redis/redis.conf:ro
       - sockets:/sockets
-    command: [
-      "redis-server",
-      "/etc/redis/redis.conf"
+    entrypoint: [
+      "/bin/sh",
+      "-c", "chown redis:redis /sockets || true; exec redis-server /etc/redis/redis.conf"
     ]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
