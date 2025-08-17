@@ -9,18 +9,14 @@ import msgpack
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'rinha2025.settings')
 django.setup()
 
-from rinha2025.settings import SCHEDULER
+from rinha2025.settings import SCHEDULER, REDIS_POOL, QUEUE_NAME
 
 REDIS_URL = os.getenv("REDIS_URL", "")
 CHANNEL = "scheduler:jobs"
 STREAM_NAME = 'payments:stream'
-REDIS_POOL = aioredis.ConnectionPool.from_url(
-    REDIS_URL, decode_responses=False,
-)
 
 GROUP_NAME = "payment_processors"
 CONSUMER_NAME = "consumer-default"
-
 
 QUEUE_MAXSIZE = int(os.getenv("SUBSCRIBER_QUEUE_MAXSIZE", "900"))
 BATCH_SIZE = int(os.getenv("SUBSCRIBER_BATCH_SIZE", "80"))
@@ -77,6 +73,44 @@ async def worker(queue: asyncio.Queue):
         
         for _ in range(len(payloads)):
             queue.task_done()
+            
+
+async def _redis_worker(work_id: int, processor: str):
+    from payments.tasks import process_payment
+    from payments.models import Payment
+
+    client = aioredis.Redis(connection_pool=REDIS_POOL)
+    
+    while True:
+        queue_name = f'{QUEUE_NAME}:{processor}'
+        message_data = await client.blpop(queue_name, timeout=1.0)
+        try:
+            if not message_data:
+                await asyncio.sleep(0.5)
+                continue
+            
+            message_data = message_data[1]
+            unpacked = msgpack.loads(message_data)
+            if not isinstance(unpacked, (list, tuple)) or len(unpacked) != 3:
+                logger.warning("[work_id=%d][processor=%s] Invalid message format: %s", work_id, processor, unpacked)
+                continue
+            
+            correlation_id, amount, created_at = unpacked
+            result = await process_payment(
+                [correlation_id, amount, created_at],
+                processor
+            )
+            if result:
+                await Payment.objects.acreate(
+                    **result
+                )
+                logger.info("[work_id=%d][processor=%s] Successfully processed payment: %s", work_id, processor, correlation_id)
+        except Exception as e:
+            logger.exception(
+                "[work_id=%d][processor=%s] Failed to unpack or process a message (%r).", 
+                work_id, processor, message_data,
+                exc_info=e
+            )
 
 
 async def stream_consumer(queue: asyncio.Queue):
@@ -134,7 +168,10 @@ async def setup_consumer_group():
     try:
         # Tenta criar o grupo. O '$' significa que ele só lerá mensagens NOVAS que chegarem após a criação.
         # MKSTREAM=True cria o Stream se ele não existir ainda.
-        await client.xgroup_create(STREAM_NAME, GROUP_NAME, id='$', mkstream=True)
+        await client.xgroup_create(
+            STREAM_NAME, GROUP_NAME,
+            id='$', mkstream=True
+        )
         print(f"Grupo '{GROUP_NAME}' criado para o Stream '{STREAM_NAME}'.")
     except Exception as e:
         # Se o grupo já existe, o Redis retorna um erro. Nós podemos ignorá-lo.
@@ -177,6 +214,19 @@ async def main():
         for w in workers:
             w.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
+        
+
+async def _main():
+    to_default = int(WORKERS * 0.9)
+    async with asyncio.TaskGroup() as tg:
+        for w in range(WORKERS):
+            tg.create_task(
+                _redis_worker(
+                    work_id=w,
+                    processor="default" if w < to_default else "fallback"
+                )
+            )
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(_main())

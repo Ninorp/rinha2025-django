@@ -16,6 +16,8 @@ from os import getenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.redis import RedisJobStore
 
+import redis.asyncio as aioredis
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -41,8 +43,15 @@ INSTALLED_APPS = [
 ]
 
 REDIS_SOCKET_PATH = getenv('REDIS_SOCKET_PATH', '')
+REDIS_URL = getenv('REDIS_URL', '')
 REDIS_PORT = getenv('REDIS_PORT', '6379')
 REDIS_DB = getenv('REDIS_DB', '0')
+
+QUEUE_NAME = getenv('QUEUE_NAME', 'payments:queue')
+REDIS_POOL = aioredis.ConnectionPool.from_url(
+    REDIS_URL, decode_responses=False
+)
+REDIS_CLIENT = aioredis.Redis(connection_pool=REDIS_POOL)
 
 JOBSTORES = {
     'default': RedisJobStore(

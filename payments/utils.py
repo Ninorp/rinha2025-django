@@ -1,24 +1,25 @@
 from datetime import datetime
 
-import redis.asyncio as aioredis
 import msgpack
-from scheduler_service import REDIS_POOL, STREAM_NAME
+import asyncio
+
+from rinha2025.settings import REDIS_CLIENT, QUEUE_NAME
 
 
-async def add_payment_to_queue(payload: dict):
+async def add_payment_to_queue(payload: dict, processor: str = 'default'):
     correlation_id = payload['correlationId']
     amount = payload['amount']
     created_at = datetime.now().isoformat()
 
-    r = aioredis.Redis(connection_pool=REDIS_POOL)
-
-    packed_data = msgpack.packb((
-        correlation_id,
-        amount,
-        created_at,
-    ))
-
-    await r.xadd(
-        STREAM_NAME, 
-        dict(payload=packed_data)
+    asyncio.create_task(
+        REDIS_CLIENT.rpush(
+            f'{QUEUE_NAME}:{processor}', 
+            msgpack.dumps(
+                (
+                    correlation_id,
+                    amount,
+                    created_at,
+                )
+            )
+        )
     )

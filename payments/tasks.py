@@ -10,6 +10,8 @@ PAYMENT_PROCESSOR_URL_DEFAULT = getenv("PAYMENT_PROCESSOR_URL_DEFAULT")
 PAYMENT_PROCESSOR_URL_FALLBACK = getenv("PAYMENT_PROCESSOR_URL_FALLBACK")
 HEALTH_RESULTS = {}
 
+TIMEOUT=httpx.Timeout(5, connect=1)
+
 logger = logging.getLogger('payments_tasks')
 logger.setLevel(logging.DEBUG)
 
@@ -18,14 +20,14 @@ fh.setLevel(logging.DEBUG)
 logger.addHandler(fh)
 
 
-async def process_payment(payload: list):
+async def process_payment(payload: list, processor: str):
     correlation_id = payload[0]
     amount = payload[1]
     created_at = payload[2]
 
     async def _process(url: str) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
                 payments_url = url + '/payments'
                 resp = await client.post(
                     payments_url,
@@ -34,17 +36,15 @@ async def process_payment(payload: list):
                         "amount": float(amount),
                         "requestedAt": created_at,
                     },
+                    headers={
+                        "Content-Type": "application/json",
+                    }
                 )
             return resp.status_code == 200
         except Exception:
             return False
 
-    url = None
-    for _url, result in HEALTH_RESULTS.items():
-        if not result.get("failing"):
-            url = _url
-            break
-
+    url = PAYMENT_PROCESSOR_URL_DEFAULT if processor == 'default' else PAYMENT_PROCESSOR_URL_FALLBACK
     logger.debug("Processing payment with: %s", url)
 
     if url and await _process(url):
@@ -61,7 +61,7 @@ async def process_payment(payload: list):
         "correlationId": correlation_id,
         "amount": amount,
         "created_at": created_at
-    })
+    }, processor='default' if processor == 'fallback' else 'fallback')
     return None
     
 
