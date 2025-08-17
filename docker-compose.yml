@@ -16,6 +16,7 @@ x-common-env: &common_env
   PAYMENT_PROCESSOR_URL_FALLBACK: "http://payment-processor-fallback:8080"
   SUBSCRIBER_QUEUE_MAXSIZE: "1000"
   SCHEDULER_WORKERS: "3"
+  SUBSCRIBER_BATCH_SIZE: "50"
 
 services:
 

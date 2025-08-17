@@ -24,7 +24,7 @@ CONSUMER_NAME = "consumer-default"
 
 QUEUE_MAXSIZE = int(os.getenv("SUBSCRIBER_QUEUE_MAXSIZE", "1000"))
 BATCH_SIZE = int(os.getenv("SUBSCRIBER_BATCH_SIZE", "90"))
-WORKERS = int(os.getenv("SCHEDULER_WORKERS", "4"))
+WORKERS = int(os.getenv("SCHEDULER_WORKERS", "3"))
 
 root_logger = logging.getLogger()
 
@@ -71,7 +71,9 @@ async def worker(queue: asyncio.Queue):
 
         try:
             if payments_to_create:
-                await asyncio.to_thread(Payment.objects.bulk_create, payments_to_create)
+                await Payment.objects.abulk_create(
+                    payments_to_create, ignore_conflicts=True
+                )
                 logger.info("Successfully bulk created %d payments.", len(payments_to_create))
         except Exception:
             logger.exception("Failed during bulk_create")
@@ -107,7 +109,7 @@ async def stream_consumer(queue: asyncio.Queue):
             for message_id, message in messages:
                 unpacked = msgpack.unpackb(message[b'payload'], raw=False)
 
-                if not unpacked[0] or not unpacked[1] or not unpacked[2]:
+                if not isinstance(unpacked, list) or len(unpacked) != 3:
                     logger.warning("process_payment message missing fields: %s", unpacked)
                     continue
                 
