@@ -3,7 +3,7 @@ x-common-env: &common_env
   DEBUG: "1"
   SECRET_KEY: "dev-secret-change-me"
   ALLOWED_HOSTS: "*"
-  POSTGRES_HOST: db
+  POSTGRES_HOST: /sockets
   POSTGRES_PORT: "5432"
   POSTGRES_DB: mydatabase
   POSTGRES_USER: mydatabaseuser
@@ -11,8 +11,11 @@ x-common-env: &common_env
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_DB: "0"
+  REDIS_URL: "unix:///sockets/redis.sock"
   PAYMENT_PROCESSOR_URL_DEFAULT: "http://payment-processor-default:8080"
   PAYMENT_PROCESSOR_URL_FALLBACK: "http://payment-processor-fallback:8080"
+  SUBSCRIBER_QUEUE_MAXSIZE: "1000"
+  SCHEDULER_WORKERS: "3"
 
 services:
 
@@ -27,13 +30,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
+      rds:
         condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: "0.4"
-          memory: "75M"
+          memory: "65M"
     networks:
       - rinha-net
       - payment-processor-net
@@ -51,10 +54,11 @@ services:
     command: python scheduler_service.py
     environment:
       <<: *common_env
+      REDIS_SOCKET_PATH: "/sockets/redis.sock"
     depends_on:
       db:
         condition: service_healthy
-      redis:
+      rds:
         condition: service_healthy
     deploy:
       resources:
@@ -62,6 +66,8 @@ services:
           cpus: "0.3"
           memory: "130M"
     restart: always
+    volumes:
+      - sockets:/sockets
     networks:
       - rinha-net
       - payment-processor-net
@@ -73,7 +79,7 @@ services:
       - "8000:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - sockets:/sockets
+      - sockets:/sockets:ro
     depends_on:
       - web1
       - web2
@@ -88,6 +94,7 @@ services:
   db:
     image: postgres:16-alpine
     container_name: rinha-db
+    user: root
     environment:
       POSTGRES_DB: mydatabase
       POSTGRES_USER: mydatabaseuser
@@ -95,8 +102,14 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
+      - ./db/conf/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./db/conf/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - sockets:/var/run/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: [
+        "CMD-SHELL", 
+        "pg_isready -h /var/run/postgresql -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+      ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -104,13 +117,22 @@ services:
       resources:
         limits:
           cpus: "0.30"
-          memory: "45M"
+          memory: "55M"
+    restart: always
     networks:
       - rinha-net
 
-  redis:
+  rds:
     image: redis:7-alpine
     container_name: rinha-redis
+    user: root
+    volumes:
+      - ./redis.conf:/etc/redis/redis.conf:ro
+      - sockets:/sockets
+    command: [
+      "redis-server",
+      "/etc/redis/redis.conf"
+    ]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

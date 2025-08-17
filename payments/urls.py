@@ -4,7 +4,7 @@ from ninja import Router
 
 from payments.models import Payment
 from payments.schemas import PaymentSchema
-from payments.utils import publish_payment
+from payments.utils import add_payment_to_queue
 
 
 payments_router = Router()
@@ -22,5 +22,5 @@ async def create_payment(request, payload: PaymentSchema):
     except IntegrityError:
         return HttpResponseBadRequest("Integrity error occurred while creating the payment.")
 
-    await publish_payment(payload.correlationId)
+    await add_payment_to_queue(payload.correlationId)
     return HttpResponse()

@@ -40,24 +40,25 @@ INSTALLED_APPS = [
     'ninja'
 ]
 
-REDIS_HOST = getenv('REDIS_HOST', 'localhost')
+REDIS_SOCKET_PATH = getenv('REDIS_SOCKET_PATH', '')
 REDIS_PORT = getenv('REDIS_PORT', '6379')
 REDIS_DB = getenv('REDIS_DB', '0')
 
 JOBSTORES = {
     'default': RedisJobStore(
-        host=REDIS_HOST,
-        port=int(REDIS_PORT),
+        unix_socket_path=REDIS_SOCKET_PATH,
         db=int(REDIS_DB),
     )
 }
 
 SCHEDULER = AsyncIOScheduler(
+    timezone='UTC',
     jobstores=JOBSTORES,
     job_defaults={
         'coalesce': True,
-        'max_instances': 2
-    }
+        'max_instances': 1,
+        'misfire_grace_time': 45
+    },
 )
 
 MIDDLEWARE = []

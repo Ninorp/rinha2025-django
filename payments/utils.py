@@ -1,14 +1,17 @@
 import json
 
 import redis.asyncio as aioredis
-from scheduler_service import CHANNEL, REDIS_URL
+import msgpack
+from scheduler_service import REDIS_POOL, STREAM_NAME
 
 
-async def publish_payment(correlationId: str):
-    r = aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
-    await r.publish(
-        CHANNEL, json.dumps({
-            "type": "process_payment",
-            "correlationId": correlationId,
-        })
+async def add_payment_to_queue(correlationId: str):
+    r = aioredis.Redis(connection_pool=REDIS_POOL)
+    packed_data = msgpack.packb({
+        "type": "process_payment",
+        "correlationId": correlationId,
+    })
+    await r.xadd(
+        STREAM_NAME, 
+        dict(payload=packed_data)
     )

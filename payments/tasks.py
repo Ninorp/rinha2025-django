@@ -4,7 +4,7 @@ import httpx
 from os import getenv
 from django.db import transaction
 from asgiref.sync import sync_to_async
-from payments.utils import publish_payment
+from payments.utils import add_payment_to_queue
 
 
 PAYMENT_PROCESSOR_URL_DEFAULT = getenv("PAYMENT_PROCESSOR_URL_DEFAULT")
@@ -68,7 +68,7 @@ async def process_payment(payment_id: str):
         return
 
     logger.debug('Rescheduling payment %s', payment_id)
-    await publish_payment(payment_id)
+    await add_payment_to_queue(payment_id)
 
 
 async def health_check():
