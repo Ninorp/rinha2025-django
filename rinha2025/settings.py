@@ -56,7 +56,7 @@ SCHEDULER = AsyncIOScheduler(
     jobstores=JOBSTORES,
     job_defaults={
         'coalesce': True,
-        'max_instances': 1,
+        'max_instances': 2,
         'misfire_grace_time': 45
     },
 )
