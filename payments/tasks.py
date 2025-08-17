@@ -2,14 +2,12 @@ import logging
 import httpx
 
 from os import getenv
-from django.db import transaction
-from asgiref.sync import sync_to_async
+
 from payments.utils import add_payment_to_queue
 
 
 PAYMENT_PROCESSOR_URL_DEFAULT = getenv("PAYMENT_PROCESSOR_URL_DEFAULT")
 PAYMENT_PROCESSOR_URL_FALLBACK = getenv("PAYMENT_PROCESSOR_URL_FALLBACK")
-
 HEALTH_RESULTS = {}
 
 logger = logging.getLogger('payments_tasks')
@@ -19,38 +17,24 @@ fh = logging.FileHandler("payments.log")
 fh.setLevel(logging.DEBUG)
 logger.addHandler(fh)
 
-@sync_to_async
-def _get_payment_locked(correlation_id: str):
-    from payments.models import Payment
 
-    with transaction.atomic():
-        return Payment.objects.select_for_update(
-            of=("self",)
-        ).get(correlationId=correlation_id)
-
-
-@sync_to_async
-def _mark_completed(payment, url):
-    payment.mark_as_completed(url)
-
-
-async def process_payment(payment_id: str):
-    payment = await _get_payment_locked(payment_id)
+async def process_payment(payload: list):
+    correlation_id = payload[0]
+    amount = payload[1]
+    created_at = payload[2]
 
     async def _process(url: str) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5) as client:
-                logger.debug("Calling %s", url)
                 payments_url = url + '/payments'
                 resp = await client.post(
                     payments_url,
                     json={
-                        "correlationId": payment_id,
-                        "amount": float(payment.amount),
-                        "requestedAt": payment.created_at.isoformat(),
+                        "correlationId": correlation_id,
+                        "amount": float(amount),
+                        "requestedAt": created_at,
                     },
                 )
-                logger.debug("Response: %s", resp.json())
             return resp.status_code == 200
         except Exception:
             return False
@@ -61,14 +45,21 @@ async def process_payment(payment_id: str):
             url = _url
             break
 
-    logger.debug("Selected url: %s", url)
+    logger.debug("Processing payment with: %s", url)
 
     if url and await _process(url):
-        await _mark_completed(payment, url)
-        return
+        return dict(
+            correlationId=correlation_id,
+            amount=amount,
+            created_at=created_at,
+            status='completed',
+            gatewayIdentifier=url,
+        )
 
-    logger.debug('Rescheduling payment %s', payment_id)
-    await add_payment_to_queue(payment_id)
+    logger.debug('Failed to process payment: %s', correlation_id)
+    await add_payment_to_queue(payload)
+    return None
+    
 
 
 async def health_check():
@@ -86,4 +77,3 @@ async def health_check():
     await _check(PAYMENT_PROCESSOR_URL_DEFAULT)
     await _check(PAYMENT_PROCESSOR_URL_FALLBACK)
 
-    logger.info("Health results: %s", HEALTH_RESULTS)

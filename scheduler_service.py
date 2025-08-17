@@ -1,8 +1,6 @@
 import asyncio
 import os
-import json
 import logging
-from datetime import datetime
 
 import django
 import redis.asyncio as aioredis
@@ -25,6 +23,7 @@ CONSUMER_NAME = "consumer-default"
 
 
 QUEUE_MAXSIZE = int(os.getenv("SUBSCRIBER_QUEUE_MAXSIZE", "1000"))
+BATCH_SIZE = int(os.getenv("SUBSCRIBER_BATCH_SIZE", "90"))
 WORKERS = int(os.getenv("SCHEDULER_WORKERS", "4"))
 
 root_logger = logging.getLogger()
@@ -34,42 +33,59 @@ if root_logger.handlers:
         root_logger.removeHandler(handler)
 
 logger = logging.getLogger("scheduler")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
 logger.addHandler(handler)
 
 
-def schedule_process_payment(correlation_id: str):
-    job_id = f"process_payment_{correlation_id}"
-
-    try:
-        SCHEDULER.add_job(
-            "payments.tasks:process_payment",
-            args=[correlation_id],
-            id=job_id,
-            replace_existing=True,
-            next_run_time=datetime.utcnow()
-        )
-
-        logger.info("Scheduled job %s", job_id)
-    except Exception:
-        logger.exception("Failed to schedule job %s", job_id)
-
-
 async def worker(queue: asyncio.Queue):
+    from payments.tasks import process_payment
+    from payments.models import Payment
+
     while True:
-        correlation_id = await queue.get()
+        # Wait and get first payload
         try:
-            schedule_process_payment(correlation_id)
-        except Exception as e:
-            logger.exception("Error processing item from queue", exc_info=e)
+            first_payload = await asyncio.wait_for(queue.get(), timeout=1.0)
+            payloads = [first_payload]
+        except asyncio.TimeoutError:
+            continue
+
+        drain_size = min(BATCH_SIZE - 1, queue.qsize())
+        for _ in range(drain_size):
+            try:
+                payloads.append(queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+
+        # Create asynchronous tasks (process_payment is async)
+        tasks = [asyncio.create_task(process_payment(payload)) for payload in payloads]
+
+        payments_to_create = []
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for res in results:
+            if not res or not isinstance(res, dict):
+                continue
+            payments_to_create.append(Payment(**res))
+
+        try:
+            if payments_to_create:
+                await asyncio.to_thread(Payment.objects.bulk_create, payments_to_create)
+                logger.info("Successfully bulk created %d payments.", len(payments_to_create))
+        except Exception:
+            logger.exception("Failed during bulk_create")
         finally:
-            queue.task_done()
+            for _ in range(len(payloads)):
+                try:
+                    queue.task_done()
+                except Exception:
+                    pass
 
 
 async def stream_consumer(queue: asyncio.Queue):
     client = aioredis.Redis(connection_pool=REDIS_POOL)
+    queue_size = queue.qsize()
     
     while True:
         try:
@@ -77,25 +93,30 @@ async def stream_consumer(queue: asyncio.Queue):
                 groupname=GROUP_NAME,
                 consumername=CONSUMER_NAME,
                 streams={STREAM_NAME: '>'},
-                count=1,
+                count=QUEUE_MAXSIZE - queue_size,
                 block=1000,
             )
             
-            if not stream_data :
+            if not stream_data:
                 await asyncio.sleep(1)
                 continue
 
-            message_id, message = stream_data[0][1][0]
-            unpacked = msgpack.unpackb(message[b'payload'], raw=False)
-            message_type = unpacked.get("type")
-            if message_type == "process_payment":
-                correlation_id = unpacked.get("correlationId")
-                if not correlation_id:
-                    logger.warning("process_payment message missing correlationId: %s", unpacked)
-                    continue
+            messages = stream_data[0][1]
+            ids_to_ack = []
 
-                await queue.put(correlation_id)
-                await client.xack(STREAM_NAME, GROUP_NAME, message_id)            
+            for message_id, message in messages:
+                unpacked = msgpack.unpackb(message[b'payload'], raw=False)
+
+                if not unpacked[0] or not unpacked[1] or not unpacked[2]:
+                    logger.warning("process_payment message missing fields: %s", unpacked)
+                    continue
+                
+                await queue.put(unpacked)
+                ids_to_ack.append(message_id)
+
+            if ids_to_ack:
+                await client.xack(STREAM_NAME, GROUP_NAME, *ids_to_ack)
+
         except Exception as e:
             logger.exception("Error reading stream", exc_info=e)
             await asyncio.sleep(5)

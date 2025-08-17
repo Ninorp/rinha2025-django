@@ -64,7 +64,7 @@ services:
       resources:
         limits:
           cpus: "0.3"
-          memory: "130M"
+          memory: "135M"
     restart: always
     volumes:
       - sockets:/sockets
@@ -87,7 +87,7 @@ services:
       resources:
         limits:
           cpus: "0.05"
-          memory: "15M"
+          memory: "10M"
     networks:
       - rinha-net
 
